@@ -53,7 +53,7 @@ export async function searchImages(query: string, count: number = 1): Promise<Im
       throw new Error(`Unsplash API error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     const results: ImageResult[] = (data.results || []).map((photo: any) => ({
       imageUrl: photo.urls?.regular || photo.urls?.small,
       thumbnailUrl: photo.urls?.thumb || photo.urls?.small,
