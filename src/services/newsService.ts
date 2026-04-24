@@ -3,10 +3,8 @@ import { config } from "../config";
 import { cache } from "../utils/cache";
 
 const parser = new RSSParser({
-  timeout: 10000, // 10s timeout per feed
-  headers: {
-    "User-Agent": "PostPulse/1.0 (News Aggregator)",
-  },
+  timeout: 10000,
+  headers: { "User-Agent": "PostPulse/1.0" },
 });
 
 export interface NewsArticle {
@@ -20,146 +18,171 @@ export interface NewsArticle {
   link: string;
   publishedAt: string;
   isRead: boolean;
+  provider: string;
+}
+
+interface NewsProvider {
+  name: string;
+  fetch(limit: number): Promise<NewsArticle[]>;
 }
 
 /**
- * Extract image URL from RSS item.
- * Tries multiple common locations: enclosure, media:content, media:thumbnail, og:image in content.
+ * Provider for curated RSS feeds.
  */
-function extractImage(item: any): string | null {
-  // 1. Enclosure (most common for images)
-  if (item.enclosure && item.enclosure.url) {
-    return item.enclosure.url;
-  }
+class RssProvider implements NewsProvider {
+  name = "rss";
 
-  // 2. Media content / thumbnail
-  if (item["media:content"] && item["media:content"]["$"] && item["media:content"]["$"].url) {
-    return item["media:content"]["$"].url;
-  }
-  if (item["media:thumbnail"] && item["media:thumbnail"]["$"] && item["media:thumbnail"]["$"].url) {
-    return item["media:thumbnail"]["$"].url;
-  }
+  async fetch(limit: number): Promise<NewsArticle[]> {
+    const allArticles: NewsArticle[] = [];
+    const feedResults = await Promise.allSettled(
+      config.rssFeeds.map(async (feed) => {
+        try {
+          const parsed = await parser.parseURL(feed.url);
+          return { feed, items: parsed.items || [] };
+        } catch (err: any) {
+          console.warn(`[RssProvider] Failed to fetch ${feed.name}: ${err.message}`);
+          return { feed, items: [] };
+        }
+      })
+    );
 
-  // 3. Try to find an image in the content/description HTML
-  const content = item["content:encoded"] || item.content || item.contentSnippet || "";
-  const imgMatch = content.match(/<img[^>]+src=["']([^"']+)["']/i);
-  if (imgMatch && imgMatch[1]) {
-    return imgMatch[1];
-  }
+    for (const result of feedResults) {
+      if (result.status === "rejected") continue;
+      const { feed, items } = result.value;
 
-  return null;
+      for (const item of items) {
+        if (!item.title || !item.link) continue;
+        allArticles.push({
+          id: generateId(item.link),
+          title: item.title.trim(),
+          summary: cleanText(item.contentSnippet || item.content || item.description, 250),
+          source: feed.name,
+          sourceIcon: getSourceIcon(feed.url),
+          category: feed.category,
+          imageUrl: extractImage(item),
+          link: item.link,
+          publishedAt: item.isoDate || item.pubDate || new Date().toISOString(),
+          isRead: false,
+          provider: this.name,
+        });
+      }
+    }
+    return allArticles;
+  }
 }
 
 /**
- * Generate a simple hash-based ID from a URL string.
+ * Provider for NewsData.io API.
  */
-function generateId(url: string): string {
-  let hash = 0;
-  for (let i = 0; i < url.length; i++) {
-    const char = url.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0; // Convert to 32bit integer
+class NewsDataIoProvider implements NewsProvider {
+  name = "newsdata.io";
+
+  async fetch(limit: number): Promise<NewsArticle[]> {
+    if (!config.newsDataIoKey || config.newsDataIoKey === "your_newsdata_io_key") {
+      return [];
+    }
+
+    try {
+      const url = `https://newsdata.io/api/1/news?apikey=${config.newsDataIoKey}&q=artificial%20intelligence%20OR%20machine%20learning&language=en&category=technology`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const data = await response.json() as any;
+      const results = data.results || [];
+
+      return results.map((item: any) => ({
+        id: generateId(item.link),
+        title: item.title,
+        summary: cleanText(item.description || item.content, 250),
+        source: item.source_id || "NewsData.io",
+        sourceIcon: `https://www.google.com/s2/favicons?domain=${new URL(item.link).hostname}&sz=64`,
+        category: "AI & Tech",
+        imageUrl: item.image_url,
+        link: item.link,
+        publishedAt: item.pubDate || new Date().toISOString(),
+        isRead: false,
+        provider: this.name,
+      }));
+    } catch (err: any) {
+      console.warn(`[NewsDataIoProvider] Failed: ${err.message}`);
+      return [];
+    }
   }
-  return Math.abs(hash).toString(36);
 }
 
 /**
- * Get a favicon URL for a given source domain.
- */
-function getSourceIcon(feedUrl: string): string {
-  try {
-    const url = new URL(feedUrl);
-    return `https://www.google.com/s2/favicons?domain=${url.hostname}&sz=64`;
-  } catch {
-    return "https://www.google.com/s2/favicons?domain=news.google.com&sz=64";
-  }
-}
-
-/**
- * Clean HTML tags from a string and truncate to maxLength.
- */
-function cleanText(html: string | undefined, maxLength: number = 200): string {
-  if (!html) return "";
-  const text = html
-    .replace(/<[^>]*>/g, "")      // Strip HTML
-    .replace(/&[a-z]+;/gi, " ")   // Strip HTML entities
-    .replace(/\s+/g, " ")         // Normalize whitespace
-    .trim();
-  return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
-}
-
-/**
- * Fetch articles from all configured RSS feeds.
- * Results are cached for the configured TTL.
+ * Orchestrates multiple news providers with deduplication.
  */
 export async function fetchNewsFeed(limit: number = 20): Promise<NewsArticle[]> {
   const cacheKey = `news_feed_${limit}`;
   const cached = cache.get<NewsArticle[]>(cacheKey);
-  if (cached) {
-    console.log(`[NewsService] Serving ${cached.length} articles from cache`);
-    return cached;
-  }
+  if (cached) return cached;
 
-  console.log(`[NewsService] Fetching from ${config.rssFeeds.length} RSS feeds...`);
+  const providers: NewsProvider[] = [
+    new RssProvider(),
+    new NewsDataIoProvider(),
+    // Future providers (GNews, WorldNews, etc.) can be added here
+  ];
 
-  const allArticles: NewsArticle[] = [];
+  console.log(`[NewsService] Fetching from ${providers.length} providers...`);
 
-  // Fetch all feeds concurrently
-  const feedResults = await Promise.allSettled(
-    config.rssFeeds.map(async (feed) => {
-      try {
-        const parsed = await parser.parseURL(feed.url);
-        return { feed, items: parsed.items || [] };
-      } catch (err: any) {
-        console.warn(`[NewsService] Failed to fetch ${feed.name}: ${err.message}`);
-        return { feed, items: [] };
-      }
-    })
-  );
+  const results = await Promise.allSettled(providers.map(p => p.fetch(limit)));
+  let allArticles: NewsArticle[] = [];
 
-  for (const result of feedResults) {
-    if (result.status === "rejected") continue;
-
-    const { feed, items } = result.value;
-
-    for (const item of items) {
-      if (!item.title || !item.link) continue;
-
-      allArticles.push({
-        id: generateId(item.link),
-        title: item.title.trim(),
-        summary: cleanText(item.contentSnippet || item.content || item.description, 250),
-        source: feed.name,
-        sourceIcon: getSourceIcon(feed.url),
-        category: feed.category,
-        imageUrl: extractImage(item),
-        link: item.link,
-        publishedAt: item.isoDate || item.pubDate || new Date().toISOString(),
-        isRead: false,
-      });
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      allArticles = [...allArticles, ...result.value];
     }
   }
 
-  // Sort by published date (newest first)
-  allArticles.sort(
-    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
-  );
+  // Sort by date (newest first)
+  allArticles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
-  // Deduplicate by title similarity (simple exact match)
+  // Deduplicate by normalized title
   const seen = new Set<string>();
   const deduplicated = allArticles.filter((article) => {
-    const key = article.title.toLowerCase().trim();
+    const key = article.title.toLowerCase().replace(/[^a-z0-9]/g, "").substring(0, 50);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 
-  // Limit results
-  const limited = deduplicated.slice(0, limit);
+  const finalResult = deduplicated.slice(0, limit);
+  cache.set(cacheKey, finalResult, config.cacheTtlMinutes);
+  
+  return finalResult;
+}
 
-  // Cache the results
-  cache.set(cacheKey, limited, config.cacheTtlMinutes);
-  console.log(`[NewsService] Cached ${limited.length} articles (TTL: ${config.cacheTtlMinutes}min)`);
+// ─── Helper Functions ─────────────────────────────────────
 
-  return limited;
+function extractImage(item: any): string | null {
+  if (item.enclosure?.url) return item.enclosure.url;
+  if (item["media:content"]?.["$"]?.url) return item["media:content"]["$"].url;
+  if (item["media:thumbnail"]?.["$"]?.url) return item["media:thumbnail"]["$"].url;
+  const content = item["content:encoded"] || item.content || item.description || "";
+  const imgMatch = content.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return imgMatch ? imgMatch[1] : null;
+}
+
+function generateId(url: string): string {
+  let hash = 0;
+  for (let i = 0; i < url.length; i++) {
+    hash = (hash << 5) - hash + url.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function getSourceIcon(feedUrl: string): string {
+  try {
+    return `https://www.google.com/s2/favicons?domain=${new URL(feedUrl).hostname}&sz=64`;
+  } catch {
+    return "https://www.google.com/s2/favicons?domain=news.google.com&sz=64";
+  }
+}
+
+function cleanText(html: string | undefined, maxLength: number = 200): string {
+  if (!html) return "";
+  const text = html.replace(/<[^>]*>/g, "").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
 }

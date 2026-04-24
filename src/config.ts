@@ -6,6 +6,8 @@ export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY || "",
   cacheTtlMinutes: parseInt(process.env.CACHE_TTL_MINUTES || "5", 10),
+  newsDataIoKey: process.env.NEWSDATA_IO_KEY || "",
+  gNewsKey: process.env.GNEWS_KEY || "",
 
   // Curated RSS feeds — AI, ML, Tech Companies, Future Tech
   rssFeeds: [

@@ -10,6 +10,8 @@ var config = {
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY || "",
   cacheTtlMinutes: parseInt(process.env.CACHE_TTL_MINUTES || "5", 10),
+  newsDataIoKey: process.env.NEWSDATA_IO_KEY || "",
+  gNewsKey: process.env.GNEWS_KEY || "",
   // Curated RSS feeds — AI, ML, Tech Companies, Future Tech
   rssFeeds: [
     {
@@ -130,41 +132,125 @@ var cache = new MemoryCache();
 // src/services/newsService.ts
 var parser = new RSSParser({
   timeout: 1e4,
-  // 10s timeout per feed
-  headers: {
-    "User-Agent": "PostPulse/1.0 (News Aggregator)"
-  }
+  headers: { "User-Agent": "PostPulse/1.0" }
 });
+var RssProvider = class {
+  name = "rss";
+  async fetch(limit) {
+    const allArticles = [];
+    const feedResults = await Promise.allSettled(
+      config.rssFeeds.map(async (feed) => {
+        try {
+          const parsed = await parser.parseURL(feed.url);
+          return { feed, items: parsed.items || [] };
+        } catch (err) {
+          console.warn(`[RssProvider] Failed to fetch ${feed.name}: ${err.message}`);
+          return { feed, items: [] };
+        }
+      })
+    );
+    for (const result of feedResults) {
+      if (result.status === "rejected") continue;
+      const { feed, items } = result.value;
+      for (const item of items) {
+        if (!item.title || !item.link) continue;
+        allArticles.push({
+          id: generateId(item.link),
+          title: item.title.trim(),
+          summary: cleanText(item.contentSnippet || item.content || item.description, 250),
+          source: feed.name,
+          sourceIcon: getSourceIcon(feed.url),
+          category: feed.category,
+          imageUrl: extractImage(item),
+          link: item.link,
+          publishedAt: item.isoDate || item.pubDate || (/* @__PURE__ */ new Date()).toISOString(),
+          isRead: false,
+          provider: this.name
+        });
+      }
+    }
+    return allArticles;
+  }
+};
+var NewsDataIoProvider = class {
+  name = "newsdata.io";
+  async fetch(limit) {
+    if (!config.newsDataIoKey || config.newsDataIoKey === "your_newsdata_io_key") {
+      return [];
+    }
+    try {
+      const url = `https://newsdata.io/api/1/news?apikey=${config.newsDataIoKey}&q=artificial%20intelligence%20OR%20machine%20learning&language=en&category=technology`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const results = data.results || [];
+      return results.map((item) => ({
+        id: generateId(item.link),
+        title: item.title,
+        summary: cleanText(item.description || item.content, 250),
+        source: item.source_id || "NewsData.io",
+        sourceIcon: `https://www.google.com/s2/favicons?domain=${new URL(item.link).hostname}&sz=64`,
+        category: "AI & Tech",
+        imageUrl: item.image_url,
+        link: item.link,
+        publishedAt: item.pubDate || (/* @__PURE__ */ new Date()).toISOString(),
+        isRead: false,
+        provider: this.name
+      }));
+    } catch (err) {
+      console.warn(`[NewsDataIoProvider] Failed: ${err.message}`);
+      return [];
+    }
+  }
+};
+async function fetchNewsFeed(limit = 20) {
+  const cacheKey = `news_feed_${limit}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+  const providers = [
+    new RssProvider(),
+    new NewsDataIoProvider()
+    // Future providers (GNews, WorldNews, etc.) can be added here
+  ];
+  console.log(`[NewsService] Fetching from ${providers.length} providers...`);
+  const results = await Promise.allSettled(providers.map((p) => p.fetch(limit)));
+  let allArticles = [];
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      allArticles = [...allArticles, ...result.value];
+    }
+  }
+  allArticles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+  const seen = /* @__PURE__ */ new Set();
+  const deduplicated = allArticles.filter((article) => {
+    const key = article.title.toLowerCase().replace(/[^a-z0-9]/g, "").substring(0, 50);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const finalResult = deduplicated.slice(0, limit);
+  cache.set(cacheKey, finalResult, config.cacheTtlMinutes);
+  return finalResult;
+}
 function extractImage(item) {
-  if (item.enclosure && item.enclosure.url) {
-    return item.enclosure.url;
-  }
-  if (item["media:content"] && item["media:content"]["$"] && item["media:content"]["$"].url) {
-    return item["media:content"]["$"].url;
-  }
-  if (item["media:thumbnail"] && item["media:thumbnail"]["$"] && item["media:thumbnail"]["$"].url) {
-    return item["media:thumbnail"]["$"].url;
-  }
-  const content = item["content:encoded"] || item.content || item.contentSnippet || "";
+  if (item.enclosure?.url) return item.enclosure.url;
+  if (item["media:content"]?.["$"]?.url) return item["media:content"]["$"].url;
+  if (item["media:thumbnail"]?.["$"]?.url) return item["media:thumbnail"]["$"].url;
+  const content = item["content:encoded"] || item.content || item.description || "";
   const imgMatch = content.match(/<img[^>]+src=["']([^"']+)["']/i);
-  if (imgMatch && imgMatch[1]) {
-    return imgMatch[1];
-  }
-  return null;
+  return imgMatch ? imgMatch[1] : null;
 }
 function generateId(url) {
   let hash = 0;
   for (let i = 0; i < url.length; i++) {
-    const char = url.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
+    hash = (hash << 5) - hash + url.charCodeAt(i);
     hash |= 0;
   }
   return Math.abs(hash).toString(36);
 }
 function getSourceIcon(feedUrl) {
   try {
-    const url = new URL(feedUrl);
-    return `https://www.google.com/s2/favicons?domain=${url.hostname}&sz=64`;
+    return `https://www.google.com/s2/favicons?domain=${new URL(feedUrl).hostname}&sz=64`;
   } catch {
     return "https://www.google.com/s2/favicons?domain=news.google.com&sz=64";
   }
@@ -173,60 +259,6 @@ function cleanText(html, maxLength = 200) {
   if (!html) return "";
   const text = html.replace(/<[^>]*>/g, "").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
-}
-async function fetchNewsFeed(limit = 20) {
-  const cacheKey = `news_feed_${limit}`;
-  const cached = cache.get(cacheKey);
-  if (cached) {
-    console.log(`[NewsService] Serving ${cached.length} articles from cache`);
-    return cached;
-  }
-  console.log(`[NewsService] Fetching from ${config.rssFeeds.length} RSS feeds...`);
-  const allArticles = [];
-  const feedResults = await Promise.allSettled(
-    config.rssFeeds.map(async (feed) => {
-      try {
-        const parsed = await parser.parseURL(feed.url);
-        return { feed, items: parsed.items || [] };
-      } catch (err) {
-        console.warn(`[NewsService] Failed to fetch ${feed.name}: ${err.message}`);
-        return { feed, items: [] };
-      }
-    })
-  );
-  for (const result of feedResults) {
-    if (result.status === "rejected") continue;
-    const { feed, items } = result.value;
-    for (const item of items) {
-      if (!item.title || !item.link) continue;
-      allArticles.push({
-        id: generateId(item.link),
-        title: item.title.trim(),
-        summary: cleanText(item.contentSnippet || item.content || item.description, 250),
-        source: feed.name,
-        sourceIcon: getSourceIcon(feed.url),
-        category: feed.category,
-        imageUrl: extractImage(item),
-        link: item.link,
-        publishedAt: item.isoDate || item.pubDate || (/* @__PURE__ */ new Date()).toISOString(),
-        isRead: false
-      });
-    }
-  }
-  allArticles.sort(
-    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
-  );
-  const seen = /* @__PURE__ */ new Set();
-  const deduplicated = allArticles.filter((article) => {
-    const key = article.title.toLowerCase().trim();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  const limited = deduplicated.slice(0, limit);
-  cache.set(cacheKey, limited, config.cacheTtlMinutes);
-  console.log(`[NewsService] Cached ${limited.length} articles (TTL: ${config.cacheTtlMinutes}min)`);
-  return limited;
 }
 
 // src/routes/news.ts
