@@ -613,6 +613,13 @@ app.use((req, _res, next) => {
 app.use("/api/v1/news", news_default);
 app.use("/api/v1/post", post_default);
 app.use("/api/v1/image", image_default);
+app.get("/", (_req, res) => {
+  res.json({
+    message: "PostPulse API is running",
+    healthCheck: "/api/v1/health",
+    version: "1.0.0"
+  });
+});
 app.get("/api/v1/health", (_req, res) => {
   res.json({
     status: "ok",

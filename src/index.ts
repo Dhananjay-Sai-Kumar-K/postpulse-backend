@@ -23,6 +23,15 @@ app.use("/api/v1/news", newsRouter);
 app.use("/api/v1/post", postRouter);
 app.use("/api/v1/image", imageRouter);
 
+// Root redirect/health for Vercel debugging
+app.get("/", (_req, res) => {
+  res.json({
+    message: "PostPulse API is running",
+    healthCheck: "/api/v1/health",
+    version: "1.0.0"
+  });
+});
+
 // Health check
 app.get("/api/v1/health", (_req, res) => {
   res.json({
