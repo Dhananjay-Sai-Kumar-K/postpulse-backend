@@ -3,11 +3,11 @@
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/src/index.ts"
+      "destination": "/api/index.mjs"
     }
   ],
   "functions": {
-    "src/index.ts": {
+    "api/index.mjs": {
       "maxDuration": 60
     }
   }

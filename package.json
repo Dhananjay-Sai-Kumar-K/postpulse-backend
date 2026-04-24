@@ -2,11 +2,14 @@
   "name": "postpulse-backend",
   "version": "1.0.0",
   "description": "PostPulse — AI-powered news aggregation & social post generation API",
-  "main": "dist/index.js",
+  "main": "api/index.mjs",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js"
+    "build": "tsup src/index.ts --format esm --platform node --target node20 --outDir api --clean --no-splitting",
+    "start": "node api/index.mjs"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
@@ -21,6 +24,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
+    "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

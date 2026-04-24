@@ -55,28 +55,30 @@ app.use((_req, res) => {
   });
 });
 
-// ─── Start Server ────────────────────────────────────────
-app.listen(config.port, "0.0.0.0", () => {
-  console.log(`
-╔══════════════════════════════════════════════════╗
-║                                                  ║
-║   ⚡ PostPulse API v1.0.0                        ║
-║   🌐 http://localhost:${config.port}                    ║
-║                                                  ║
-║   Endpoints:                                     ║
-║     GET  /api/v1/health                          ║
-║     GET  /api/v1/news/feed?limit=20              ║
-║     POST /api/v1/post/generate                   ║
-║     POST /api/v1/post/regenerate                 ║
-║     GET  /api/v1/image/search?query=...          ║
-║                                                  ║
-║   RSS Feeds: ${String(config.rssFeeds.length).padEnd(2)} sources configured             ║
-║   Cache TTL: ${String(config.cacheTtlMinutes).padEnd(2)} minutes                        ║
-║   Gemini:    ${(config.geminiApiKey && config.geminiApiKey !== "your_gemini_api_key_here" ? "✅ Configured" : "❌ Not set").padEnd(16)}               ║
-║   Unsplash:  ${(config.unsplashAccessKey && config.unsplashAccessKey !== "your_unsplash_access_key_here" ? "✅ Configured" : "❌ Not set").padEnd(16)}               ║
-║                                                  ║
-╚══════════════════════════════════════════════════╝
-  `);
-});
+// ─── Start Server (Only in local development) ─────────────
+if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+  app.listen(config.port, "0.0.0.0", () => {
+    console.log(`
+  ╔══════════════════════════════════════════════════╗
+  ║                                                  ║
+  ║   ⚡ PostPulse API v1.0.0                        ║
+  ║   🌐 http://localhost:${config.port}                    ║
+  ║                                                  ║
+  ║   Endpoints:                                     ║
+  ║     GET  /api/v1/health                          ║
+  ║     GET  /api/v1/news/feed?limit=20              ║
+  ║     POST /api/v1/post/generate                   ║
+  ║     POST /api/v1/post/regenerate                 ║
+  ║     GET  /api/v1/image/search?query=...          ║
+  ║                                                  ║
+  ║   RSS Feeds: ${String(config.rssFeeds.length).padEnd(2)} sources configured             ║
+  ║   Cache TTL: ${String(config.cacheTtlMinutes).padEnd(2)} minutes                        ║
+  ║   Gemini:    ${(config.geminiApiKey && config.geminiApiKey !== "your_gemini_api_key_here" ? "✅ Configured" : "❌ Not set").padEnd(16)}               ║
+  ║   Unsplash:  ${(config.unsplashAccessKey && config.unsplashAccessKey !== "your_unsplash_access_key_here" ? "✅ Configured" : "❌ Not set").padEnd(16)}               ║
+  ║                                                  ║
+  ╚══════════════════════════════════════════════════╝
+    `);
+  });
+}
 
 export default app;
