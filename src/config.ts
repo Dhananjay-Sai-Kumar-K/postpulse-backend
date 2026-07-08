@@ -8,6 +8,9 @@ export const config = {
   cacheTtlMinutes: parseInt(process.env.CACHE_TTL_MINUTES || "5", 10),
   newsDataIoKey: process.env.NEWSDATA_IO_KEY || "",
   gNewsKey: process.env.GNEWS_KEY || "",
+  xquikApiKey: process.env.XQUIK_API_KEY || "",
+  xquikApiBaseUrl: (process.env.XQUIK_API_BASE_URL || "https://xquik.com/api/v1").replace(/\/+$/, ""),
+  xquikSearchQuery: process.env.XQUIK_SEARCH_QUERY || "AI OR startup OR SaaS",
 
   // Curated RSS feeds — AI, ML, Tech Companies, Future Tech
   rssFeeds: [

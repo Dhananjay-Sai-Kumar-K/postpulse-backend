@@ -42,6 +42,8 @@ app.get("/api/v1/health", (_req, res) => {
     config: {
       geminiConfigured: config.geminiApiKey !== "" && config.geminiApiKey !== "your_gemini_api_key_here",
       unsplashConfigured: config.unsplashAccessKey !== "" && config.unsplashAccessKey !== "your_unsplash_access_key_here",
+      xquikConfigured: config.xquikApiKey !== "" && config.xquikApiKey !== "your_xquik_api_key",
+      xquikSearchQuery: config.xquikSearchQuery,
       feedCount: config.rssFeeds.length,
       cacheTtl: `${config.cacheTtlMinutes}min`,
     },
@@ -60,6 +62,7 @@ app.use((_req, res) => {
       "POST /api/v1/post/generate",
       "POST /api/v1/post/regenerate",
       "GET  /api/v1/image/search?query=...",
+      "Optional Xquik feed source via XQUIK_API_KEY",
     ],
   });
 });
@@ -84,6 +87,7 @@ if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
   ║   Cache TTL: ${String(config.cacheTtlMinutes).padEnd(2)} minutes                        ║
   ║   Gemini:    ${(config.geminiApiKey && config.geminiApiKey !== "your_gemini_api_key_here" ? "✅ Configured" : "❌ Not set").padEnd(16)}               ║
   ║   Unsplash:  ${(config.unsplashAccessKey && config.unsplashAccessKey !== "your_unsplash_access_key_here" ? "✅ Configured" : "❌ Not set").padEnd(16)}               ║
+  ║   Xquik:     ${(config.xquikApiKey && config.xquikApiKey !== "your_xquik_api_key" ? "✅ Configured" : "❌ Not set").padEnd(16)}               ║
   ║                                                  ║
   ╚══════════════════════════════════════════════════╝
     `);

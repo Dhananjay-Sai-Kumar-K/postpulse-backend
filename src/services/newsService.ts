@@ -26,6 +26,27 @@ interface NewsProvider {
   fetch(limit: number): Promise<NewsArticle[]>;
 }
 
+interface XquikTweet {
+  id: string;
+  text?: string;
+  url?: string;
+  createdAt?: string;
+  likeCount?: number;
+  retweetCount?: number;
+  replyCount?: number;
+  quoteCount?: number;
+  viewCount?: number;
+  author?: {
+    username?: string;
+    name?: string;
+    profilePicture?: string;
+  };
+}
+
+interface XquikSearchResponse {
+  tweets?: XquikTweet[];
+}
+
 /**
  * Provider for curated RSS feeds.
  */
@@ -68,6 +89,43 @@ class RssProvider implements NewsProvider {
       }
     }
     return allArticles;
+  }
+}
+
+/**
+ * Provider for live X discussions through Xquik.
+ */
+class XquikProvider implements NewsProvider {
+  name = "xquik";
+
+  async fetch(limit: number): Promise<NewsArticle[]> {
+    if (!config.xquikApiKey || config.xquikApiKey === "your_xquik_api_key") {
+      return [];
+    }
+
+    const url = new URL(`${config.xquikApiBaseUrl}/x/tweets/search`);
+    url.searchParams.set("q", config.xquikSearchQuery);
+    url.searchParams.set("queryType", "Top");
+    url.searchParams.set("limit", String(Math.min(Math.max(limit, 1), 50)));
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "accept": "application/json",
+          "x-api-key": config.xquikApiKey,
+          "xquik-api-contract": "2026-04-29",
+        },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json() as XquikSearchResponse;
+      return (data.tweets || [])
+        .filter((tweet) => tweet.id && tweet.text)
+        .map((tweet) => toXquikArticle(tweet));
+    } catch (err: any) {
+      console.warn(`[XquikProvider] Failed: ${err.message}`);
+      return [];
+    }
   }
 }
 
@@ -120,6 +178,7 @@ export async function fetchNewsFeed(limit: number = 20): Promise<NewsArticle[]> 
 
   const providers: NewsProvider[] = [
     new RssProvider(),
+    new XquikProvider(),
     new NewsDataIoProvider(),
     // Future providers (GNews, WorldNews, etc.) can be added here
   ];
@@ -162,6 +221,35 @@ function extractImage(item: any): string | null {
   const content = item["content:encoded"] || item.content || item.description || "";
   const imgMatch = content.match(/<img[^>]+src=["']([^"']+)["']/i);
   return imgMatch ? imgMatch[1] : null;
+}
+
+function toXquikArticle(tweet: XquikTweet): NewsArticle {
+  const author = tweet.author?.username ? `@${tweet.author.username}` : "Xquik";
+  const metrics = [
+    tweet.viewCount ? `${tweet.viewCount} views` : "",
+    tweet.likeCount ? `${tweet.likeCount} likes` : "",
+    tweet.retweetCount ? `${tweet.retweetCount} reposts` : "",
+    tweet.replyCount ? `${tweet.replyCount} replies` : "",
+  ].filter(Boolean).join(" · ");
+
+  return {
+    id: `xquik-${tweet.id}`,
+    title: trimTitle(tweet.text || ""),
+    summary: cleanText(`${tweet.text || ""}${metrics ? ` ${metrics}` : ""}`, 250),
+    source: `Xquik: ${author}`,
+    sourceIcon: tweet.author?.profilePicture || "https://www.google.com/s2/favicons?domain=xquik.com&sz=64",
+    category: "Social Signals",
+    imageUrl: null,
+    link: tweet.url || `https://x.com/i/web/status/${tweet.id}`,
+    publishedAt: tweet.createdAt || new Date().toISOString(),
+    isRead: false,
+    provider: "xquik",
+  };
+}
+
+function trimTitle(text: string): string {
+  const normalized = cleanText(text, 120);
+  return normalized || "X discussion";
 }
 
 function generateId(url: string): string {
