@@ -15,7 +15,7 @@ var config = {
   xquikApiKey: process.env.XQUIK_API_KEY || "",
   xquikApiBaseUrl: (process.env.XQUIK_API_BASE_URL || "https://xquik.com/api/v1").replace(/\/+$/, ""),
   xquikSearchQuery: process.env.XQUIK_SEARCH_QUERY || "AI OR startup OR SaaS",
-  // Curated RSS feeds — AI, ML, Tech Companies, Future Tech
+  // Curated RSS feeds - AI, ML, Tech Companies, Future Tech
   rssFeeds: [
     {
       name: "TechCrunch AI",
@@ -93,7 +93,7 @@ var MemoryCache = class {
   get(key) {
     const entry = this.store.get(key);
     if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
+    if (Date.now() >= entry.expiresAt) {
       this.store.delete(key);
       return null;
     }
@@ -189,15 +189,15 @@ var XquikProvider = class {
       const response = await fetch(url, {
         headers: {
           "accept": "application/json",
-          "x-api-key": config.xquikApiKey,
-          "xquik-api-contract": "2026-04-29"
+          "x-api-key": config.xquikApiKey
         }
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       return (data.tweets || []).filter((tweet) => tweet.id && tweet.text).map((tweet) => toXquikArticle(tweet));
-    } catch (err) {
-      console.warn(`[XquikProvider] Failed: ${err.message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[XquikProvider] Failed: ${message}`);
       return [];
     }
   }

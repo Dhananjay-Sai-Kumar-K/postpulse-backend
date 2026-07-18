@@ -32,9 +32,15 @@ XQUIK_SEARCH_QUERY=AI OR startup OR SaaS
 
 The feed keeps RSS as the default baseline and adds Xquik results only when the key is configured. Xquik items are returned as `Social Signals` articles, so the existing post generation endpoint can use them without a new request shape.
 
+- [Xquik API documentation](https://docs.xquik.com/api-reference/overview)
+- [Xquik X/Twitter Scraper source](https://github.com/Xquik-dev/x-twitter-scraper)
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
+
 ## Validation
 
 ```bash
+npm test
 npm run build
 npm start
 ```

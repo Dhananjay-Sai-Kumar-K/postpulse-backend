@@ -95,7 +95,7 @@ class RssProvider implements NewsProvider {
 /**
  * Provider for live X discussions through Xquik.
  */
-class XquikProvider implements NewsProvider {
+export class XquikProvider implements NewsProvider {
   name = "xquik";
 
   async fetch(limit: number): Promise<NewsArticle[]> {
@@ -113,7 +113,6 @@ class XquikProvider implements NewsProvider {
         headers: {
           "accept": "application/json",
           "x-api-key": config.xquikApiKey,
-          "xquik-api-contract": "2026-04-29",
         },
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -122,8 +121,9 @@ class XquikProvider implements NewsProvider {
       return (data.tweets || [])
         .filter((tweet) => tweet.id && tweet.text)
         .map((tweet) => toXquikArticle(tweet));
-    } catch (err: any) {
-      console.warn(`[XquikProvider] Failed: ${err.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[XquikProvider] Failed: ${message}`);
       return [];
     }
   }
@@ -212,7 +212,7 @@ export async function fetchNewsFeed(limit: number = 20): Promise<NewsArticle[]> 
   return finalResult;
 }
 
-// ─── Helper Functions ─────────────────────────────────────
+// Helper functions
 
 function extractImage(item: any): string | null {
   if (item.enclosure?.url) return item.enclosure.url;

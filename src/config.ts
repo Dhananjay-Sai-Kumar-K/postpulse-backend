@@ -12,7 +12,7 @@ export const config = {
   xquikApiBaseUrl: (process.env.XQUIK_API_BASE_URL || "https://xquik.com/api/v1").replace(/\/+$/, ""),
   xquikSearchQuery: process.env.XQUIK_SEARCH_QUERY || "AI OR startup OR SaaS",
 
-  // Curated RSS feeds — AI, ML, Tech Companies, Future Tech
+  // Curated RSS feeds - AI, ML, Tech Companies, Future Tech
   rssFeeds: [
     {
       name: "TechCrunch AI",
