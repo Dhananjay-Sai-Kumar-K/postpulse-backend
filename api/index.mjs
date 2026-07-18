@@ -12,7 +12,10 @@ var config = {
   cacheTtlMinutes: parseInt(process.env.CACHE_TTL_MINUTES || "5", 10),
   newsDataIoKey: process.env.NEWSDATA_IO_KEY || "",
   gNewsKey: process.env.GNEWS_KEY || "",
-  // Curated RSS feeds — AI, ML, Tech Companies, Future Tech
+  xquikApiKey: process.env.XQUIK_API_KEY || "",
+  xquikApiBaseUrl: (process.env.XQUIK_API_BASE_URL || "https://xquik.com/api/v1").replace(/\/+$/, ""),
+  xquikSearchQuery: process.env.XQUIK_SEARCH_QUERY || "AI OR startup OR SaaS",
+  // Curated RSS feeds - AI, ML, Tech Companies, Future Tech
   rssFeeds: [
     {
       name: "TechCrunch AI",
@@ -90,7 +93,7 @@ var MemoryCache = class {
   get(key) {
     const entry = this.store.get(key);
     if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
+    if (Date.now() >= entry.expiresAt) {
       this.store.delete(key);
       return null;
     }
@@ -172,6 +175,33 @@ var RssProvider = class {
     return allArticles;
   }
 };
+var XquikProvider = class {
+  name = "xquik";
+  async fetch(limit) {
+    if (!config.xquikApiKey || config.xquikApiKey === "your_xquik_api_key") {
+      return [];
+    }
+    const url = new URL(`${config.xquikApiBaseUrl}/x/tweets/search`);
+    url.searchParams.set("q", config.xquikSearchQuery);
+    url.searchParams.set("queryType", "Top");
+    url.searchParams.set("limit", String(Math.min(Math.max(limit, 1), 50)));
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "accept": "application/json",
+          "x-api-key": config.xquikApiKey
+        }
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      return (data.tweets || []).filter((tweet) => tweet.id && tweet.text).map((tweet) => toXquikArticle(tweet));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[XquikProvider] Failed: ${message}`);
+      return [];
+    }
+  }
+};
 var NewsDataIoProvider = class {
   name = "newsdata.io";
   async fetch(limit) {
@@ -209,6 +239,7 @@ async function fetchNewsFeed(limit = 20) {
   if (cached) return cached;
   const providers = [
     new RssProvider(),
+    new XquikProvider(),
     new NewsDataIoProvider()
     // Future providers (GNews, WorldNews, etc.) can be added here
   ];
@@ -239,6 +270,32 @@ function extractImage(item) {
   const content = item["content:encoded"] || item.content || item.description || "";
   const imgMatch = content.match(/<img[^>]+src=["']([^"']+)["']/i);
   return imgMatch ? imgMatch[1] : null;
+}
+function toXquikArticle(tweet) {
+  const author = tweet.author?.username ? `@${tweet.author.username}` : "Xquik";
+  const metrics = [
+    tweet.viewCount ? `${tweet.viewCount} views` : "",
+    tweet.likeCount ? `${tweet.likeCount} likes` : "",
+    tweet.retweetCount ? `${tweet.retweetCount} reposts` : "",
+    tweet.replyCount ? `${tweet.replyCount} replies` : ""
+  ].filter(Boolean).join(" \xB7 ");
+  return {
+    id: `xquik-${tweet.id}`,
+    title: trimTitle(tweet.text || ""),
+    summary: cleanText(`${tweet.text || ""}${metrics ? ` ${metrics}` : ""}`, 250),
+    source: `Xquik: ${author}`,
+    sourceIcon: tweet.author?.profilePicture || "https://www.google.com/s2/favicons?domain=xquik.com&sz=64",
+    category: "Social Signals",
+    imageUrl: null,
+    link: tweet.url || `https://x.com/i/web/status/${tweet.id}`,
+    publishedAt: tweet.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+    isRead: false,
+    provider: "xquik"
+  };
+}
+function trimTitle(text) {
+  const normalized = cleanText(text, 120);
+  return normalized || "X discussion";
 }
 function generateId(url) {
   let hash = 0;
@@ -661,6 +718,8 @@ app.get("/api/v1/health", (_req, res) => {
     config: {
       geminiConfigured: config.geminiApiKey !== "" && config.geminiApiKey !== "your_gemini_api_key_here",
       unsplashConfigured: config.unsplashAccessKey !== "" && config.unsplashAccessKey !== "your_unsplash_access_key_here",
+      xquikConfigured: config.xquikApiKey !== "" && config.xquikApiKey !== "your_xquik_api_key",
+      xquikSearchQuery: config.xquikSearchQuery,
       feedCount: config.rssFeeds.length,
       cacheTtl: `${config.cacheTtlMinutes}min`
     }
@@ -676,7 +735,8 @@ app.use((_req, res) => {
       "GET  /api/v1/news/feed?limit=20",
       "POST /api/v1/post/generate",
       "POST /api/v1/post/regenerate",
-      "GET  /api/v1/image/search?query=..."
+      "GET  /api/v1/image/search?query=...",
+      "Optional Xquik feed source via XQUIK_API_KEY"
     ]
   });
 });
@@ -699,6 +759,7 @@ if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
   \u2551   Cache TTL: ${String(config.cacheTtlMinutes).padEnd(2)} minutes                        \u2551
   \u2551   Gemini:    ${(config.geminiApiKey && config.geminiApiKey !== "your_gemini_api_key_here" ? "\u2705 Configured" : "\u274C Not set").padEnd(16)}               \u2551
   \u2551   Unsplash:  ${(config.unsplashAccessKey && config.unsplashAccessKey !== "your_unsplash_access_key_here" ? "\u2705 Configured" : "\u274C Not set").padEnd(16)}               \u2551
+  \u2551   Xquik:     ${(config.xquikApiKey && config.xquikApiKey !== "your_xquik_api_key" ? "\u2705 Configured" : "\u274C Not set").padEnd(16)}               \u2551
   \u2551                                                  \u2551
   \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D
     `);
